@@ -40,7 +40,7 @@ Follow these instructions to get your development environment up and running.
     cp .env-example .env
     ```
 
-    Next, open the `.env` file and replace the placeholder values with your specific Google Cloud Project ID and location.
+    Next, open the `.env` file and replace the placeholder values with your specific Google Cloud Project ID, location, and Cloud Storage bucket name.
 
     Then, run the startup script using `source` to apply the settings to your current terminal session. You will need to do this for every new session.
     ```bash
@@ -100,3 +100,16 @@ The following commands will create a service account and grant it the necessary 
       --member="serviceAccount:${SA_NAME}@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com" \
       --role="roles/storage.objectAdmin"
     ```
+
+### Create Cloud Storage Bucket
+
+This project requires a Cloud Storage bucket to act as a data lake for storing raw, unprocessed data. The following command will create a bucket for this purpose. It uses the `$GOOGLE_CLOUD_PROJECT` environment variable to help ensure the bucket name is globally unique.
+
+**Important**: The name of the bucket created here must match the `GCS_BUCKET_NAME` value in your `.env` file.
+
+```bash
+export BUCKET_NAME="scribe-v3-raw-data-lake-${GOOGLE_CLOUD_PROJECT}"
+gcloud storage buckets create gs://${BUCKET_NAME} \
+  --project=${GOOGLE_CLOUD_PROJECT} \
+  --location=US
+```

@@ -12,12 +12,15 @@
 
 echo "Setting Google Cloud environment variables..."
 
-export GOOGLE_CLOUD_PROJECT="scribe-v3-514163"
-export GOOGLE_CLOUD_LOCATION="us-central1"
+# Load environment variables from .env file if it exists
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+else
+    echo "Warning: .env file not found. Please create it from .env-example."
+fi
 
 echo "✓ GOOGLE_CLOUD_PROJECT set to: ${GOOGLE_CLOUD_PROJECT}"
 echo "✓ GOOGLE_CLOUD_LOCATION set to: ${GOOGLE_CLOUD_LOCATION}"
-
 echo ""
 echo "Configuring gcloud CLI and Application Default Credentials (ADC)..."
 

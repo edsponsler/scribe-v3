@@ -1,0 +1,29 @@
+# --- Biblical Text ---
+# The Holy Bible, King James Version (Complete)
+30
+
+# --- Jewish Antiquity & Hellenistic Judaism ---
+# The Works of Flavius Josephus (trans. by William Whiston)
+2848
+# The Works of Philo Judaeus (trans. by C.D. Yonge)
+15993
+
+# --- Greek Philosophy & History ---
+# The Dialogues of Plato (trans. by Benjamin Jowett)
+1636
+# The Nicomachean Ethics by Aristotle
+8438
+# The Histories by Herodotus (trans. by A. D. Godley)
+2456
+# History of the Peloponnesian War by Thucydides (trans. by Richard Crawley)
+7142
+# Plutarch's Lives (Dryden translation)
+674
+
+# --- Roman Philosophy & History ---
+# The Meditations by Marcus Aurelius
+2680
+
+# --- Early Christian Texts ---
+# The Confessions of St. Augustine (trans. by E. B. Pusey)
+3296
