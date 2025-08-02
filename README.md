@@ -58,7 +58,7 @@ This project relies on several Google Cloud services. You must enable their APIs
 Run the following command to enable all the necessary APIs. The command uses the `$GOOGLE_CLOUD_PROJECT` environment variable, which is set by the `startup.sh` script.
 
 ```bash
-gcloud services enable aiplatform.googleapis.com storage.googleapis.com run.googleapis.com documentai.googleapis.com bigquery.googleapis.com --project=$GOOGLE_CLOUD_PROJECT
+gcloud services enable aiplatform.googleapis.com storage.googleapis.com run.googleapis.com documentai.googleapis.com bigquery.googleapis.com --project=${GOOGLE_CLOUD_PROJECT}
 ```
 
 This will enable the following services:
@@ -70,3 +70,33 @@ This will enable the following services:
 *   **BigQuery API** (`bigquery.googleapis.com`): For data analysis and warehousing.
 
 Once these steps are complete, your environment is ready for development.
+
+### Create a Service Account
+
+For applications to authenticate with Google Cloud services programmatically (e.g., from a CI/CD pipeline or a deployed service like Cloud Run), it is best practice to use a dedicated service account instead of personal user credentials.
+
+The following commands will create a service account and grant it the necessary permissions for this project. These commands use the `$GOOGLE_CLOUD_PROJECT` environment variable set by the `startup.sh` script.
+
+1.  **Define a name for your service account and create it:**
+    ```bash
+    export SA_NAME="scribe-programmatic-user"
+
+    gcloud iam service-accounts create ${SA_NAME} \
+      --description="Service account for SCRIBE v3 application" \
+      --display-name="SCRIBE Programmatic User" \
+      --project=${GOOGLE_CLOUD_PROJECT}
+    ```
+
+2.  **Grant the necessary IAM roles to the service account:**
+    The service account needs permissions to interact with Vertex AI (for Gemini) and Cloud Storage.
+    ```bash
+    # Grant Vertex AI User role
+    gcloud projects add-iam-policy-binding ${GOOGLE_CLOUD_PROJECT} \
+      --member="serviceAccount:${SA_NAME}@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com" \
+      --role="roles/aiplatform.user"
+
+    # Grant Storage Object Admin role
+    gcloud projects add-iam-policy-binding ${GOOGLE_CLOUD_PROJECT} \
+      --member="serviceAccount:${SA_NAME}@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com" \
+      --role="roles/storage.objectAdmin"
+    ```
