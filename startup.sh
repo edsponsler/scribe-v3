@@ -21,7 +21,10 @@ fi
 
 echo "✓ GOOGLE_CLOUD_PROJECT set to: ${GOOGLE_CLOUD_PROJECT}"
 echo "✓ GOOGLE_CLOUD_LOCATION set to: ${GOOGLE_CLOUD_LOCATION}"
-echo ""
+echo "✓ GCS_BUCKET_NAME set to: ${GCS_BUCKET_NAME}"
+echo "✓ VERTEX_INDEX_ID set to: ${VERTEX_INDEX_ID}"
+echo "✓ VERTEX_ENDPOINT_ID set to: ${VERTEX_ENDPOINT_ID}"
+echo "✓ VERTEX_DEPLOYED_INDEX_ID set to: ${VERTEX_DEPLOYED_INDEX_ID}"
 echo "Configuring gcloud CLI and Application Default Credentials (ADC)..."
 
 # Set the active project for the gcloud CLI.

@@ -1,3 +1,4 @@
 requests
 google-cloud-storage
 python-dotenv
+google-cloud-aiplatform

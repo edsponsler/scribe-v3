@@ -1,3 +1,7 @@
+# --- Roman Philosophy & History ---
+# The Meditations by Marcus Aurelius
+2680
+
 # --- Biblical Text ---
 # The Holy Bible, King James Version (Complete)
 30
@@ -19,10 +23,6 @@
 7142
 # Plutarch's Lives (Dryden translation)
 674
-
-# --- Roman Philosophy & History ---
-# The Meditations by Marcus Aurelius
-2680
 
 # --- Early Christian Texts ---
 # The Confessions of St. Augustine (trans. by E. B. Pusey)

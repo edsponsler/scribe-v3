@@ -1,0 +1,14 @@
+[
+  {
+    "name": "chunk_hash",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "The SHA-256 hash of the text chunk's content."
+  },
+  {
+    "name": "embedding",
+    "type": "FLOAT64",
+    "mode": "REPEATED",
+    "description": "The 768-dimension vector embedding from the Gemini API."
+  }
+]
