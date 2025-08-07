@@ -25,6 +25,7 @@ echo "✓ GCS_BUCKET_NAME set to: ${GCS_BUCKET_NAME}"
 echo "✓ VERTEX_INDEX_ID set to: ${VERTEX_INDEX_ID}"
 echo "✓ VERTEX_ENDPOINT_ID set to: ${VERTEX_ENDPOINT_ID}"
 echo "✓ VERTEX_DEPLOYED_INDEX_ID set to: ${VERTEX_DEPLOYED_INDEX_ID}"
+echo "✓ VERTEX_GENERATIVE_MODEL set to: ${VERTEX_GENERATIVE_MODEL}"
 echo "Configuring gcloud CLI and Application Default Credentials (ADC)..."
 
 # Set the active project for the gcloud CLI.

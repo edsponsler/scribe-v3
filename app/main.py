@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
 import requests
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # --- Cloud and Local Imports ---
 import vertexai
@@ -19,10 +21,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 DEV_ENVIRONMENT = os.getenv("DEV_ENVIRONMENT", "local")
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION")
+GENERATIVE_MODEL_NAME = os.getenv("VERTEX_GENERATIVE_MODEL", "gemini-2.5-flash")
 
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 embedding_model = TextEmbeddingModel.from_pretrained("text-embedding-004")
-generative_model = GenerativeModel("gemini-2.5-flash")
+print(f"INFO: Initializing generative model: {GENERATIVE_MODEL_NAME}")
+generative_model = GenerativeModel(GENERATIVE_MODEL_NAME)
 
 # --- Global Vector Store variable ---
 vector_store: VectorStore = None
@@ -30,6 +34,8 @@ local_text_map: dict = {}
 
 # --- FastAPI App ---
 app = FastAPI(title="SCRIBE v3 API")
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 @app.on_event("startup")
 def startup_event():
@@ -51,8 +57,8 @@ def startup_event():
     elif DEV_ENVIRONMENT == "cloud":
         # In cloud mode, we connect to the live Vertex AI endpoint.
         ENDPOINT_ID = os.getenv("VERTEX_ENDPOINT_ID")
-        DEPLOYED_INDEX_ID = os.getenv("DEPLOYED_INDEX_ID")
-        vector_store = VertexAIVectorStore(ENDPOINT_ID, DEPLOYED_INDEX_ID)
+        VERTEX_DEPLOYED_INDEX_ID = os.getenv("VERTEX_DEPLOYED_INDEX_ID")
+        vector_store = VertexAIVectorStore(ENDPOINT_ID, VERTEX_DEPLOYED_INDEX_ID)
     
     else:
         raise ValueError(f"Unknown environment: {DEV_ENVIRONMENT}")
@@ -118,4 +124,4 @@ def query_index(request: QueryRequest):
 @app.get("/")
 def read_root():
     """ A simple health check endpoint. """
-    return {"status": "ok"}
+    return FileResponse('app/static/index.html')

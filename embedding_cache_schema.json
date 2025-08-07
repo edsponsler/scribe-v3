@@ -1,14 +1,102 @@
-[
-  {
-    "name": "chunk_hash",
-    "type": "STRING",
-    "mode": "REQUIRED",
-    "description": "The SHA-256 hash of the text chunk's content."
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SCRIBE Metadata Schema",
+  "description": "Definitive structure for the metadata associated with every chunk in the SCRIBE knowledge base.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "A unique, system-generated identifier for the chunk.",
+      "type": "string"
+    },
+    "source_id": {
+      "description": "Identifier for the parent document from which the chunk originates.",
+      "type": "string"
+    },
+    "title": {
+      "description": "The title of the work.",
+      "type": "string"
+    },
+    "author": {
+      "description": "The author(s) or attributed author(s) of the work.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "publisher": {
+      "description": "Publisher information, where available.",
+      "type": "string"
+    },
+    "publication_date": {
+      "description": "The year of publication or composition (negative for BC).",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "A direct URL to the original source material.",
+      "type": "string"
+    },
+    "language": {
+      "description": "The ISO 639-2 language code of the chunk's text.",
+      "type": "string"
+    },
+    "canonical_reference": {
+      "description": "A standardized, human-readable, and citable reference.",
+      "type": "string"
+    },
+    "text_type": {
+      "description": "The genre or type of text.",
+      "type": "string"
+    },
+    "chunk_level": {
+      "description": "The level of this chunk within the document's hierarchy.",
+      "type": "string"
+    },
+    "parent_chunk_id": {
+      "description": "The ID of the immediate parent chunk in the hierarchy.",
+      "type": "string"
+    },
+    "original_language_id": {
+      "description": "The ID of the corresponding chunk in the original language.",
+      "type": "string"
+    },
+    "topics_keywords": {
+      "description": "A list of key topics, themes, or keywords present in the chunk.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "relation_intertextuality": {
+      "description": "An array of canonical references to other texts quoted or alluded to.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "relation_commentary": {
+      "description": "An array of source IDs for texts that are commentaries on this chunk.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "relation_thematic": {
+      "description": "An array of chunk IDs that are thematically similar.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "historical_context": {
+      "description": "A brief description of the historical period and relevant context.",
+      "type": "string"
+    }
   },
-  {
-    "name": "embedding",
-    "type": "FLOAT64",
-    "mode": "REPEATED",
-    "description": "The 768-dimension vector embedding from the Gemini API."
-  }
-]
+  "required": [
+    "id",
+    "source_id",
+    "title",
+    "language",
+    "canonical_reference"
+  ]
+}
