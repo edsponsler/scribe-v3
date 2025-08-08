@@ -1,127 +1,78 @@
-# in app/main.py
-
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from pydantic import BaseModel
-import requests
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import sys
 
-# --- Cloud and Local Imports ---
-import vertexai
-from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
-from vertexai.generative_models import GenerativeModel
-from app.vector_store import VectorStore, FAISSVectorStore, VertexAIVectorStore
-from ingestion.text_processor import clean_gutenberg_text, chunk_text_by_paragraph
+# Add project root to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# --- Load Environment and Initialize ---
+from conversational_chat import ConversationalAgent
+
+# --- Load Environment and Initialize --
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-DEV_ENVIRONMENT = os.getenv("DEV_ENVIRONMENT", "local")
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION")
-GENERATIVE_MODEL_NAME = os.getenv("VERTEX_GENERATIVE_MODEL", "gemini-2.5-flash")
-
-vertexai.init(project=PROJECT_ID, location=LOCATION)
-embedding_model = TextEmbeddingModel.from_pretrained("text-embedding-004")
-print(f"INFO: Initializing generative model: {GENERATIVE_MODEL_NAME}")
-generative_model = GenerativeModel(GENERATIVE_MODEL_NAME)
-
-# --- Global Vector Store variable ---
-vector_store: VectorStore = None
-local_text_map: dict = {}
+GENERATIVE_MODEL_NAME = os.getenv("VERTEX_GENERATIVE_MODEL", "gemini-1.5-flash")
 
 # --- FastAPI App ---
 app = FastAPI(title="SCRIBE v3 API")
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# --- Global Agent Dictionary ---
+# We will store our pre-loaded agents here
+agents = {}
 
 @app.on_event("startup")
 def startup_event():
-    """Initializes the vector store based on the environment."""
-    global vector_store
-    global local_text_map
-    
-    if DEV_ENVIRONMENT == "local":
-        # In local mode, we load the FAISS index from disk.
-        BOOK_ID = "2680" # The book we've indexed locally
-        faiss_store = FAISSVectorStore(
-            index_path=f"app/local_index_{BOOK_ID}.faiss",
-            metadata_path=f"app/local_metadata_{BOOK_ID}.pkl"
-        )
-        faiss_store.load()
-        vector_store = faiss_store
-        local_text_map = faiss_store.text_map # Store the text map for retrieval
-    
-    elif DEV_ENVIRONMENT == "cloud":
-        # In cloud mode, we connect to the live Vertex AI endpoint.
-        ENDPOINT_ID = os.getenv("VERTEX_ENDPOINT_ID")
-        VERTEX_DEPLOYED_INDEX_ID = os.getenv("VERTEX_DEPLOYED_INDEX_ID")
-        vector_store = VertexAIVectorStore(ENDPOINT_ID, VERTEX_DEPLOYED_INDEX_ID)
-    
-    else:
-        raise ValueError(f"Unknown environment: {DEV_ENVIRONMENT}")
-
-
-def get_text_for_chunks(chunk_ids: list[str]) -> str:
-    """Retrieves the text for chunk IDs, using the appropriate method for the environment."""
-    if DEV_ENVIRONMENT == "local":
-        # Local: Look up text in the loaded metadata map
-        return "\n---\n".join([local_text_map.get(cid, "") for cid in chunk_ids])
-    
-    else: # Cloud
-        # Cloud: Re-download and process the book (inefficient MVP method)
-        books = {}
-        # ... (The rest of this cloud-based retrieval function is the same as before)
-        # ... (This can be copied from the previous version of main.py if needed)
-        return "Cloud text retrieval not fully implemented in this snippet."
-
-
-class QueryRequest(BaseModel):
-    question: str
-
-class QueryResponse(BaseModel):
-    question: str
-    answer: str
-    context: str
-
-@app.post("/query", response_model=QueryResponse)
-def query_index(request: QueryRequest):
     """
-    Accepts a user's question, finds relevant chunks, and returns a grounded answer.
+    Initializes and loads the conversational agents for each source at startup.
     """
-    global vector_store
-    print(f"Received query in '{DEV_ENVIRONMENT}' mode: {request.question}")
-
-    # 1. Embed the user's question
-    query_embedding = embedding_model.get_embeddings([request.question])[0].values
+    print("--- Server is starting up. Loading conversational agents... ---")
+    global agents
     
-    # 2. Find relevant document chunks (using our abstraction)
-    found_chunk_ids = vector_store.find_neighbors(query_embedding, num_neighbors=3)
-    print(f"Found neighbors: {found_chunk_ids}")
-
-    # 3. Retrieve the actual text for those chunks
-    context_text = get_text_for_chunks(found_chunk_ids)
+    # Initialize Genesis Agent
+    print("  -> Initializing agent for source: genesis")
+    agents["genesis"] = ConversationalAgent(GENERATIVE_MODEL_NAME, source="genesis")
     
-    # 4. Engineer a prompt and generate a final answer
-    prompt = f"""
-    You are SCRIBE, a scholarly assistant. Answer the user's question based *only* on the provided context.
-
-    CONTEXT:
-    {context_text}
-
-    QUESTION:
-    {request.question}
-
-    ANSWER:
-    """
-    generation_response = generative_model.generate_content(prompt)
-    answer = generation_response.text
+    # Initialize Gutenberg Agent
+    print("  -> Initializing agent for source: gutenberg")
+    agents["gutenberg"] = ConversationalAgent(GENERATIVE_MODEL_NAME, source="gutenberg")
     
-    return {"question": request.question, "answer": answer, "context": context_text}
+    print("--- All agents loaded and ready. ---")
+
+
+# --- API Models ---
+class ChatRequest(BaseModel):
+    message: str
+    source: str # e.g., "genesis" or "gutenberg"
+
+class ChatResponse(BaseModel):
+    reply: str
+
+# --- API Endpoints ---
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 @app.get("/")
 def read_root():
-    """ A simple health check endpoint. """
+    """ Serves the main chat interface. """
     return FileResponse('app/static/index.html')
+
+@app.post("/chat", response_model=ChatResponse)
+def chat_endpoint(request: ChatRequest):
+    """
+    Accepts a user's message and a source, and returns the agent's response.
+    """
+    global agents
+    print(f"Received message for source '{request.source}': {request.message}")
+    
+    agent = agents.get(request.source)
+    
+    if not agent:
+        return {"reply": f"Error: No agent found for source '{request.source}'. Available sources are: {list(agents.keys())}"}
+        
+    reply = agent.chat(request.message)
+    
+    return {"reply": reply}

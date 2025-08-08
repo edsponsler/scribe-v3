@@ -3,83 +3,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCRIBE v3</title>
+    <title>SCRIBE v3 Chat</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f5f5f5; }
-        #chat-container { width: 80%; max-width: 800px; background-color: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; flex-direction: column; height: 80vh; }
-        #messages { flex-grow: 1; overflow-y: auto; padding: 20px; border-bottom: 1px solid #ddd; }
-        .message { margin-bottom: 15px; }
-        .user-message { text-align: right; }
-        .scribe-message { text-align: left; }
-        .message-bubble { display: inline-block; padding: 10px 15px; border-radius: 18px; max-width: 70%; }
-        .user-message .message-bubble { background-color: #007bff; color: white; }
-        .scribe-message .message-bubble { background-color: #e9e9eb; color: black; }
-        #input-area { display: flex; padding: 20px; }
-        #question-input { flex-grow: 1; border: 1px solid #ccc; border-radius: 18px; padding: 10px 15px; font-size: 16px; }
-        #send-button { background-color: #007bff; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; margin-left: 10px; cursor: pointer; font-size: 20px; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #chat-container {
+            width: 90%;
+            max-width: 700px;
+            height: 90vh;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #header {
+            padding: 1rem;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        #source-selector label {
+            font-weight: 500;
+            margin-right: 0.5rem;
+        }
+        #source-select {
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        #chat-history {
+            flex-grow: 1;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        .message {
+            margin-bottom: 1rem;
+            line-height: 1.5;
+        }
+        .message .sender {
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+        .message .text {
+            background-color: #f1f1f1;
+            padding: 0.75rem;
+            border-radius: 8px;
+            display: inline-block;
+            max-width: 90%;
+        }
+        .message.user .text {
+            background-color: #007bff;
+            color: white;
+        }
+        #input-area {
+            padding: 1rem;
+            border-top: 1px solid #e0e0e0;
+        }
+        #chat-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
-    <h1>SCRIBE v3</h1>
     <div id="chat-container">
-        <div id="messages"></div>
+        <div id="header">
+            <h1>SCRIBE v3</h1>
+            <div id="source-selector">
+                <label for="source-select">Source:</label>
+                <select id="source-select">
+                    <option value="gutenberg">Gutenberg (Equiano)</option>
+                    <option value="genesis">Genesis</option>
+                </select>
+            </div>
+        </div>
+        <div id="chat-history"></div>
         <div id="input-area">
-            <input type="text" id="question-input" placeholder="Ask a question...">
-            <button id="send-button">&rarr;</button>
+            <input type="text" id="chat-input" placeholder="Ask a question...">
         </div>
     </div>
 
     <script>
-        const messagesDiv = document.getElementById('messages');
-        const questionInput = document.getElementById('question-input');
-        const sendButton = document.getElementById('send-button');
+        const chatHistory = document.getElementById('chat-history');
+        const chatInput = document.getElementById('chat-input');
+        const sourceSelect = document.getElementById('source-select');
 
-        sendButton.addEventListener('click', sendMessage);
-        questionInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendMessage();
+        const appendMessage = (sender, text) => {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            if (sender === 'You') {
+                messageDiv.classList.add('user');
+            }
+
+            const senderDiv = document.createElement('div');
+            senderDiv.classList.add('sender');
+            senderDiv.textContent = sender;
+
+            const textDiv = document.createElement('div');
+            textDiv.classList.add('text');
+            textDiv.textContent = text;
+
+            messageDiv.appendChild(senderDiv);
+            messageDiv.appendChild(textDiv);
+            chatHistory.appendChild(messageDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        };
+
+        chatInput.addEventListener('keydown', async (event) => {
+            if (event.key === 'Enter' && chatInput.value.trim() !== '') {
+                const message = chatInput.value.trim();
+                const source = sourceSelect.value;
+                chatInput.value = '';
+
+                appendMessage('You', message);
+
+                try {
+                    const response = await fetch('/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ message, source })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    appendMessage('SCRIBE', data.reply);
+
+                } catch (error) {
+                    console.error('Error fetching chat response:', error);
+                    appendMessage('System', 'Sorry, there was an error connecting to the server.');
+                }
             }
         });
-
-        function addMessage(text, sender) {
-            const messageDiv = document.createElement('div');
-            messageDiv.classList.add('message', sender + '-message');
-            
-            const bubble = document.createElement('div');
-            bubble.classList.add('message-bubble');
-            bubble.textContent = text;
-            
-            messageDiv.appendChild(bubble);
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        async function sendMessage() {
-            const question = questionInput.value.trim();
-            if (!question) return;
-
-            addMessage(question, 'user');
-            questionInput.value = '';
-
-            try {
-                const response = await fetch('/query', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question: question })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                addMessage(data.answer, 'scribe');
-
-            } catch (error) {
-                console.error('Error:', error);
-                addMessage('Sorry, something went wrong. Please check the console.', 'scribe');
-            }
-        }
     </script>
 </body>
 </html>
