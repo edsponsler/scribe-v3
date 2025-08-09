@@ -140,7 +140,7 @@ class ConversationalAgent:
             print(f"  -> Retrieved 1 parent chunk and 1 child chunk from Genesis index.")
             return retrieved_parent, retrieved_child
 
-        available_sections = [s for s in self.search_indexes.keys() if s != 'introduction']
+        available_sections = list(self.search_indexes.keys())
         print(f"  -> Searching across sections: {available_sections}")
 
         top_results = []

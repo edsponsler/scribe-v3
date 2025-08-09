@@ -103,25 +103,4 @@ def chunk_text_by_paragraph(text):
             
     return good_chunks
 
-def chunk_text_by_chapter(text):
-    """
-    Splits a given text into chunks based on chapters or books.
-    """
-    chapters = re.split(r'(THE (?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|ELEVENTH|TWELFTH) BOOK)', text, flags=re.IGNORECASE)
-    
-    chunked_chapters = []
-    if chapters and chapters[0].strip():
-        if len(chapters[0].strip()) > 100:
-            chunked_chapters.append(chapters[0].strip())
-        
-    for i in range(1, len(chapters), 2):
-        if i + 1 < len(chapters):
-            chapter_title = chapters[i].strip()
-            chapter_content = chapters[i+1].strip()
-            full_chapter = f"{chapter_title}\n\n{chapter_content}"
-            chunked_chapters.append(full_chapter)
-            
-    if not chunked_chapters:
-        return [text]
-        
-    return chunked_chapters
+
