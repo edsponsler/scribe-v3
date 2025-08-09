@@ -1,4 +1,5 @@
 import re
+import codecs
 
 def extract_footnotes(text):
     """
@@ -14,84 +15,77 @@ def extract_footnotes(text):
     main_text = text[:footnote_pos].strip()
     footnote_section = text[footnote_pos + len(footnote_marker):].strip()
     
-    # Regex to find footnote definitions, e.g., "[1] Some text."
-    footnote_regex = re.compile(r"(\[\d+\])\s(.*?)(?=\s*\[\d+\]|$)", re.DOTALL)
+    footnote_regex = re.compile(r"(\[\\d+\])\\s(.*?)(?=\\s*\[\\d+\]|$)", re.DOTALL)
     
     footnote_map = {marker: content.strip() for marker, content in footnote_regex.findall(footnote_section)}
     
     print(f"  -> Extracted {len(footnote_map)} footnotes.")
     return main_text, footnote_map
 
-def parse_gutenberg_text(raw_text):
+def parse_gutenberg_text(raw_text, sections_file_path):
     """
-    Parses a raw Gutenberg text file into its constituent parts.
-    Returns a dictionary containing all extracted sections.
+    Parses a raw Gutenberg text file into its constituent parts using a sections definition file.
+    This function treats every section uniformly, prepending a title if it doesn't exist.
     """
-    parsed_content = {
-        "header": "",
-        "contents": "",
-        "main_text": "",
-        "appendix": "",
-        "notes": "",
-        "glossary": "",
-        "license": ""
-    }
+    print(f"  -> Parsing text using sections file: {sections_file_path}")
+    parsed_content = {}
 
-    # 1. Isolate Header and License (everything outside the markers)
-    start_marker = "*** START OF THE PROJECT GUTENBERG EBOOK"
-    end_marker = "*** END OF THE PROJECT GUTENBERG EBOOK"
-    start_pos = raw_text.find(start_marker)
-    end_pos = raw_text.find(end_marker)
-
-    if start_pos != -1:
-        parsed_content["header"] = raw_text[:start_pos].strip()
-        content_start = raw_text.find('\n', start_pos) + 1
-    else:
-        content_start = 0 # No header found
-
-    if end_pos != -1:
-        parsed_content["license"] = raw_text[end_pos + len(end_marker):].strip()
-        core_text = raw_text[content_start:end_pos].strip()
-    else:
-        core_text = raw_text[content_start:].strip()
-
-    # 2. Sequentially find and slice off each major section from the end
-    sections_in_order = [
-        ("glossary", "GLOSSARY"),
-        ("notes", "NOTES"),
-        ("appendix", "APPENDIX")
-    ]
+    # 1. Read the sections file and determine the order
+    with open(sections_file_path, 'r') as f:
+        lines = f.readlines()
     
-    for key, marker in sections_in_order:
-        # Use rfind to find the last occurrence, which should be the section start
-        marker_pos = core_text.rfind(marker)
-        # Check if the marker is at the beginning of a line
-        if marker_pos > 0 and core_text[marker_pos-1] in ('\n', '\r'):
-            section_text = core_text[marker_pos:].strip()
-            parsed_content[key] = section_text
-            core_text = core_text[:marker_pos].strip()
-            print(f"  -> Found and separated the {key.upper()} section.")
+    sections_def = {}
+    section_order = []
+    for line in lines:
+        if ':' not in line: continue
+        key, value = line.split(':', 1)
+        key = key.strip()
+        value = value.strip().strip('"')
+        sections_def[key] = value
+        base_name = key.split('_')[0]
+        if base_name not in section_order:
+            section_order.append(base_name)
 
-    # 3. Find the Table of Contents
-    contents_marker = "CONTENTS"
-    contents_pos = core_text.find(contents_marker)
-    if contents_pos != -1 and core_text[contents_pos-1] in ('\n', '\r'):
-        # Find the end of the contents section (usually before the first chapter)
-        prose_start_markers = [' INTRODUCTION', 'CHAPTER I', 'BOOK I']
-        end_contents_pos = -1
-        for marker in prose_start_markers:
-            pos = core_text.find(marker, contents_pos)
-            if pos != -1:
-                if end_contents_pos == -1 or pos < end_contents_pos:
-                    end_contents_pos = pos
+    # 2. Parse sections sequentially
+    current_pos = 0
+    for section_name in section_order:
+        start_marker = sections_def.get(f"{section_name}_start")
+        end_marker = sections_def.get(f"{section_name}_end")
+
+        if not start_marker or not end_marker:
+            print(f"  -> Warning: Markers for section '{section_name}' not found. Skipping.")
+            continue
+
+        start_marker = codecs.decode(start_marker, 'unicode_escape')
+        end_marker = codecs.decode(end_marker, 'unicode_escape')
+
+        start_pos = raw_text.find(start_marker, current_pos)
         
-        if end_contents_pos != -1:
-            parsed_content["contents"] = core_text[contents_pos:end_contents_pos].strip()
-            core_text = core_text[end_contents_pos:].strip()
-            print("  -> Found and separated the CONTENTS section.")
+        if start_pos == -1:
+            print(f"  -> Warning: Could not find start marker for section '{section_name}'. Skipping.")
+            continue
 
-    # 4. The remainder is the main text
-    parsed_content["main_text"] = core_text.strip()
+        if end_marker == "End Of File":
+            end_pos = len(raw_text)
+        else:
+            # Start searching for the end marker *after* the start marker
+            end_pos = raw_text.find(end_marker, start_pos + len(start_marker))
+
+        if end_pos == -1:
+            print(f"  -> Warning: Could not find end marker for section '{section_name}'. Skipping.")
+            continue
+            
+        # Extract content
+        content_start = start_pos + len(start_marker)
+        section_content = raw_text[content_start:end_pos].strip()
+        
+        # Prepend title if it's not already there
+        first_line = section_content.split('\n', 1)[0].strip()
+        if first_line.upper() != section_name.upper():
+            section_content = f"{section_name.upper()}\n\n{section_content}"
+
+        parsed_content[section_name] = section_content
+        current_pos = end_pos
 
     return parsed_content
 
@@ -104,7 +98,6 @@ def chunk_text_by_paragraph(text):
     good_chunks = []
     for p in paragraphs:
         p_stripped = p.strip()
-        # Filter out chunks that are too short or are likely headings
         if len(p_stripped) > 100 and not p_stripped.isupper():
             good_chunks.append(p_stripped)
             
@@ -112,28 +105,23 @@ def chunk_text_by_paragraph(text):
 
 def chunk_text_by_chapter(text):
     """
-    Splits a given text into chunks based on chapters.
+    Splits a given text into chunks based on chapters or books.
     """
-    # This regex looks for "CHAPTER" followed by a space and a Roman numeral or number.
-    # It handles variations in spacing and newlines.
-    chapters = re.split(r'(CHAPTER\s+[IVXLC\d]+\.?)', text, flags=re.IGNORECASE)
-    
-    # The result of the split will be [prologue, chapter_marker_1, chapter_content_1, chapter_marker_2, ...]
-    # We need to recombine the marker with its content.
+    chapters = re.split(r'(THE (?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH|ELEVENTH|TWELFTH) BOOK)', text, flags=re.IGNORECASE)
     
     chunked_chapters = []
-    # The first element is the text before the first chapter marker (prologue, etc.)
-    # We can choose to ignore it or handle it as a separate chunk if it's substantial.
-    if chapters[0].strip():
-        chunked_chapters.append(chapters[0].strip())
+    if chapters and chapters[0].strip():
+        if len(chapters[0].strip()) > 100:
+            chunked_chapters.append(chapters[0].strip())
         
-    # Iterate through the rest of the list, pairing markers with content
     for i in range(1, len(chapters), 2):
         if i + 1 < len(chapters):
             chapter_title = chapters[i].strip()
             chapter_content = chapters[i+1].strip()
-            # We prepend the title to the content to form a complete chapter chunk
             full_chapter = f"{chapter_title}\n\n{chapter_content}"
             chunked_chapters.append(full_chapter)
             
+    if not chunked_chapters:
+        return [text]
+        
     return chunked_chapters

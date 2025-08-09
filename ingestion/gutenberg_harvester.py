@@ -15,18 +15,19 @@ import vertexai
 from google.cloud import bigquery
 from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
 
-from ingestion.text_processor import parse_gutenberg_text, extract_footnotes, chunk_text_by_paragraph, chunk_text_by_chapter
+from ingestion.text_processor import parse_gutenberg_text, extract_footnotes, chunk_text_by_paragraph
 
-def get_book_metadata(book_id):
-    """Fetches book metadata from the Gutendex API."""
-    try:
-        url = f"http://gutendex.com/books/{book_id}"
-        response = requests.get(url)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching metadata for book {book_id} from Gutendex: {e}")
-        return None
+def get_book_metadata(header_text):
+    """Extracts book metadata from the header text."""
+    title_match = re.search(r"Title: (.+)", header_text)
+    author_match = re.search(r"Author: (.+)", header_text)
+    release_date_match = re.search(r"Release date: (.+)", header_text)
+
+    return {
+        "title": title_match.group(1).strip() if title_match else "Unknown Title",
+        "author": author_match.group(1).strip() if author_match else "N/A",
+        "publication_year": release_date_match.group(1).split('[')[0].strip() if release_date_match else "N/A"
+    }
 
 def map_gutenberg_to_schema(book_metadata, chunk_text, chunk_index, source_section="main_text"):
     """Maps Gutenberg data to the SCRIBE metadata schema."""
@@ -115,16 +116,15 @@ def _process_text_section(section_name, section_text, book_metadata, embedding_m
         return None, None, None
 
     print(f"  -> Processing section: {section_name}")
-    # 1. Extract footnotes before chunking
     text_sans_footnotes, footnote_map = extract_footnotes(section_text)
 
-    # 2. Create parent chunks (chapters or logical sections)
-    parent_chunks = chunk_text_by_chapter(text_sans_footnotes)
+    # With the new parser, every section is a single parent chunk with its title prepended.
+    parent_chunks = [text_sans_footnotes]
+
     if not parent_chunks:
         print(f"  -> No parent chunks found for section '{section_name}'. Skipping.")
         return None, None, None
 
-    # 3. Create child chunks (paragraphs)
     child_chunks = []
     for parent_chunk in parent_chunks:
         paragraphs = chunk_text_by_paragraph(parent_chunk)
@@ -133,35 +133,41 @@ def _process_text_section(section_name, section_text, book_metadata, embedding_m
         print(f"  -> No child chunks found for section '{section_name}'. Skipping.")
         return None, None, None
 
-    # 4. Create Retrieval Store (Parent Chunks + Footnote Map)
     retrieval_store = {}
     for i, parent_text in enumerate(parent_chunks):
         parent_id = str(uuid.uuid4())
+        
+        # The title is now reliably the first line.
+        first_line = parent_text.split('\n', 1)[0].strip()
+        if len(first_line) < 100 and first_line.isupper():
+            section_title = first_line
+        else:
+            # Fallback for any malformed section
+            section_title = section_name.replace("_", " ").title()
+
         retrieval_store[parent_id] = {
             "id": parent_id,
             "source_id": f"gutenberg:{book_metadata.get('id')}",
             "source_section": section_name,
             "title": book_metadata.get("title"),
-            "canonical_reference": f"{book_metadata.get('title')} - {section_name} - Section {i + 1}",
+            "canonical_reference": f"{book_metadata.get('title')}, {section_title}",
             "text": parent_text,
-            "footnote_map": footnote_map
+            "footnote_map": footnote_map,
+            "child_chunks": []
         }
 
-    # 5. Create Search Metadata (for child chunks)
     search_metadata_list = []
-    for i, child_text in enumerate(child_chunks):
-        # Find the parent ID for this child chunk
-        parent_id = None
-        for pid, parent_data in retrieval_store.items():
-            if child_text in parent_data['text']:
-                parent_id = pid
-                break
-        
-        child_metadata = map_gutenberg_to_schema(book_metadata, child_text, i, section_name)
-        child_metadata['parent_chunk_id'] = parent_id
-        search_metadata_list.append(child_metadata)
+    parent_text_to_id_map = {p_data['text']: p_id for p_id, p_data in retrieval_store.items()}
 
-    # 6. Get Embeddings for child chunks
+    for parent_text, parent_id in parent_text_to_id_map.items():
+        paragraphs = chunk_text_by_paragraph(parent_text)
+        for i, child_text in enumerate(paragraphs):
+            child_metadata = map_gutenberg_to_schema(book_metadata, child_text, i, section_name)
+            child_metadata['parent_chunk_id'] = parent_id
+            child_metadata['chunk_id'] = str(uuid.uuid4())
+            search_metadata_list.append(child_metadata)
+            retrieval_store[parent_id]['child_chunks'].append(child_metadata)
+
     child_texts = [m['text'] for m in search_metadata_list]
     child_embeddings = get_embeddings_with_cache(embedding_model, bq_client, cache_table_id, child_texts)
 
@@ -172,59 +178,51 @@ def process_book(book_id, embedding_model, bq_client, cache_table_id):
     Downloads, parses, chunks, and embeds a book with multiple sections.
     """
     try:
-        # 1. Get API Metadata and Raw Text
-        print(f"  -> Fetching metadata for book {book_id}...")
-        api_metadata = get_book_metadata(book_id)
-        if not api_metadata: return {}
-
         book_url = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
         print(f"  -> Downloading {book_url}")
         response = requests.get(book_url, timeout=15)
         response.raise_for_status()
         raw_text = response.text
 
-        # 2. Parse the raw text into sections
-        parsed_content = parse_gutenberg_text(raw_text)
+        sections_file_path = os.path.join(os.path.dirname(__file__), 'raw', f'pg{book_id}-sections.txt')
+        parsed_content = parse_gutenberg_text(raw_text, sections_file_path)
 
-        # 3. Save Book-Level Metadata
-        book_metadata = {
-            "api_metadata": api_metadata,
-            "gutenberg_header": parsed_content["header"],
-            "gutenberg_license": parsed_content["license"]
-        }
+        book_metadata = get_book_metadata(parsed_content.get("HEADER", ""))
+        book_metadata["gutenberg_license"] = parsed_content.get("LICENSE", "")
         metadata_path = f"app/local_book_metadata_{book_id}.json"
         with open(metadata_path, 'w') as f:
             json.dump(book_metadata, f, indent=2)
         print(f"  -> Book-level metadata saved to '{metadata_path}'")
 
-        # 4. Process and Save Glossary
-        if parsed_content["glossary"]:
-            # Simple key-value parsing for glossary
-            glossary_text = parsed_content["glossary"].replace("GLOSSARY", "").strip()
+        if "GLOSSARY" in parsed_content:
+            glossary_text = parsed_content["GLOSSARY"].replace("GLOSSARY", "").strip()
             glossary_map = dict(re.findall(r'(.*?)\s+(.*)', glossary_text))
             glossary_path = f"app/local_glossary_{book_id}.pkl"
             with open(glossary_path, 'wb') as f:
                 pickle.dump(glossary_map, f)
             print(f"  -> Glossary saved to '{glossary_path}'")
 
-        # 5. Process Main Text and Appendix
-        main_text_data = _process_text_section("main_text", parsed_content["main_text"], api_metadata, embedding_model, bq_client, cache_table_id)
-        appendix_data = _process_text_section("appendix", parsed_content["appendix"], api_metadata, embedding_model, bq_client, cache_table_id)
+        processed_data = {}
+        ignore_list = ["HEADER", "CONTENTS", "NOTES", "GLOSSARY", "LICENSE"]
 
-        # 6. Perform QC Check with Table of Contents
-        if parsed_content["contents"]:
-            print("  -> Performing QC check with Table of Contents...")
-            toc_items = [line.strip() for line in parsed_content["contents"].split('\n') if line.strip() and line.strip() != "CONTENTS"]
-            found_titles = [item['canonical_reference'].split(' - ')[-1] for item in main_text_data[0].values()] if main_text_data[0] else []
-            # A simple check to see if TOC items are mentioned in found titles
-            # This is a basic check and can be improved
-            match_count = sum(1 for item in toc_items if any(item in title for title in found_titles))
-            print(f"  -> QC Check: {match_count}/{len(toc_items)} Table of Contents items appear to be referenced in the parsed sections.")
-
-        return {
-            "main_text": main_text_data,
-            "appendix": appendix_data
-        }
+        for section_name, section_text in parsed_content.items():
+            if section_name in ignore_list:
+                continue
+            
+            logical_name = section_name.lower().replace(" ", "_")
+            
+            print(f"--- Processing new logical section: {logical_name} ---")
+            section_data = _process_text_section(
+                logical_name, 
+                section_text, 
+                book_metadata, 
+                embedding_model, 
+                bq_client, 
+                cache_table_id
+            )
+            processed_data[logical_name] = section_data
+        
+        return processed_data
 
     except Exception as e:
         print(f"An error occurred while processing book {book_id}: {e}")
@@ -255,22 +253,17 @@ def main():
     for book_id in book_ids[:1]:
         print(f"\n--- Processing book ID: {book_id} ---")
         
-        # --- Clean up all potential old files ---
-        # ... (add cleanup logic here if needed)
-
         processed_data = process_book(book_id, embedding_model, bq_client, cache_table_id)
 
-        # --- Save all generated files ---
         for section_name, section_data in processed_data.items():
+            if not section_data: continue
             retrieval_store, search_metadata, search_embeddings = section_data
             if retrieval_store and search_metadata and search_embeddings:
-                # Save Retrieval Store (parent chunks)
                 retrieval_path = f"app/local_{section_name}_retrieval_{book_id}.pkl"
                 with open(retrieval_path, 'wb') as f:
                     pickle.dump(retrieval_store, f)
                 print(f"  -> Retrieval store for '{section_name}' saved to '{retrieval_path}'")
 
-                # Save Search Index (child chunk embeddings)
                 db_vectors = np.array(search_embeddings, dtype=np.float32)
                 index = faiss.IndexFlatL2(db_vectors.shape[1])
                 index.add(db_vectors)
@@ -278,13 +271,12 @@ def main():
                 faiss.write_index(index, index_path)
                 print(f"  -> Search index for '{section_name}' saved to '{index_path}'")
 
-                # Save Search Metadata (child chunk metadata)
                 search_meta_path = f"app/local_{section_name}_search_{book_id}.pkl"
                 with open(search_meta_path, 'wb') as f:
                     pickle.dump(search_metadata, f)
                 print(f"  -> Search metadata for '{section_name}' saved to '{search_meta_path}'")
 
-        time.sleep(1) # Be nice to the API
+        time.sleep(1)
 
     print("\nGutenberg harvester process complete.")
 

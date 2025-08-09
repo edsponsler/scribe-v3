@@ -14,28 +14,12 @@ import vertexai
 from google.cloud import bigquery
 from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
 
-from ingestion.text_processor import chunk_text_by_paragraph # Assuming Sefaria text can be chunked this way
-
-def map_sefaria_to_schema(sefaria_data, chunk_text, chunk_index):
-    """Maps Sefaria API response to the SCRIBE metadata schema."""
-    ref = sefaria_data.get('ref')
-    mapped_data = {
-        "id": str(uuid.uuid4()),
-        "source_id": f"sefaria:{ref}",
-        "title": sefaria_data.get('book'),
-        "author": None, # Not typically available at this level
-        "publisher": sefaria_data.get('publisher'),
-        "source_url": f"https://www.sefaria.org/{ref.replace(' ', '_')}",
-        "language": "en", # Assuming English text for now
-        "canonical_reference": f"{ref}:{chunk_index + 1}",
-        "text_type": sefaria_data.get('type'),
-        "chunk_level": "verse", # Or could be 'paragraph' depending on chunking
-        "text": chunk_text
-    }
-    return {k: v for k, v in mapped_data.items() if v is not None}
+# --- Helper Functions ---
 
 def get_embeddings_with_cache(embedding_model, bq_client, cache_table_id, chunks):
     """Gets embeddings for a list of text chunks, using a BigQuery cache."""
+    if not chunks:
+        return []
     print(f"  -> Getting embeddings for {len(chunks)} chunks, using BigQuery cache...")
     embedding_vectors = []
     api_calls = 0
@@ -79,55 +63,90 @@ def get_embeddings_with_cache(embedding_model, bq_client, cache_table_id, chunks
     print(f"  -> Embeddings retrieved. Made {api_calls} new API calls.")
     return embedding_vectors
 
-def process_sefaria_text(reference, embedding_model, bq_client, cache_table_id):
-    """
-    Fetches, chunks, embeds, and builds a local FAISS index for a Sefaria text.
-    """
+# --- Sefaria-Specific Processing ---
+
+def get_text_for_reference(reference):
+    """Fetches the text for a specific Sefaria reference."""
     try:
-        # 1. Fetch Data
-        url = f"https://www.sefaria.org/api/texts/{reference}"
-        print(f"  -> Fetching data from {url}")
+        url = f"https://www.sefaria.org/api/texts/{reference}?context=0"
         response = requests.get(url)
         response.raise_for_status()
-        sefaria_data = response.json()
-
-        # 2. Extract and Chunk Text
-        # The 'text' field can be a list of strings (verses/paragraphs)
-        raw_text_chunks = sefaria_data.get('text', [])
-        if not isinstance(raw_text_chunks, list):
-            raw_text_chunks = [str(raw_text_chunks)] # Ensure it's a list
-        
-        # Simple cleaning (can be improved)
-        chunks = [text.strip() for text in raw_text_chunks if text.strip()]
-        if not chunks:
-            print(f"  -> No content chunks found for {reference}. Skipping.")
-            return
-
-        # 3. Get Embeddings
-        embedding_vectors = get_embeddings_with_cache(embedding_model, bq_client, cache_table_id, chunks)
-
-        # 4. Build and Save FAISS Index
-        db_vectors = np.array(embedding_vectors, dtype=np.float32)
-        index = faiss.IndexFlatL2(db_vectors.shape[1])
-        index.add(db_vectors)
-        index_path = f"app/local_index_sefaria_{reference.replace(' ', '_')}.faiss"
-        faiss.write_index(index, index_path)
-        print(f"  -> FAISS index saved to '{index_path}'")
-
-        # 5. Map to Schema and Save Metadata
-        all_metadata = [map_sefaria_to_schema(sefaria_data, chunk, i) for i, chunk in enumerate(chunks)]
-        metadata_path = f"app/local_metadata_sefaria_{reference.replace(' ', '_')}.pkl"
-        with open(metadata_path, 'wb') as f:
-            pickle.dump(all_metadata, f)
-        print(f"  -> Metadata saved to '{metadata_path}'")
-
+        return response.json()
     except Exception as e:
-        print(f"An error occurred while processing {reference}: {e}")
+        print(f"Error fetching text for {reference}: {e}")
+        return None
+
+def process_book_from_sefaria(book_name, embedding_model, bq_client, cache_table_id):
+    """
+    Processes a full book from Sefaria using a chapter-based parent/child chunking strategy.
+    """
+    print(f"--- Processing book: {book_name} from Sefaria ---")
+
+    retrieval_store = {}
+    search_metadata_list = []
+    child_texts_for_embedding = []
+    total_verses = 0
+
+    # Genesis has 50 chapters
+    for chap_num in range(1, 51):
+        chapter_ref = f"{book_name} {chap_num}"
+        print(f"  -> Processing chapter: {chapter_ref}")
+        chapter_data = get_text_for_reference(chapter_ref)
+        if not chapter_data or not chapter_data.get('text'):
+            print(f"    -> No text found for {chapter_ref}. Skipping.")
+            continue
+
+        parent_id = str(uuid.uuid4())
+        parent_text = " ".join(chapter_data['text'])
+
+        retrieval_store[parent_id] = {
+            "id": parent_id,
+            "source_id": f"sefaria:{chapter_ref}",
+            "title": book_name,
+            "canonical_reference": chapter_ref,
+            "text": parent_text,
+            "child_chunks": []
+        }
+
+        for verse_num, verse_text in enumerate(chapter_data.get('text', [])):
+            verse_ref = f"{book_name} {chap_num}:{verse_num + 1}"
+            child_id = str(uuid.uuid4())
+            total_verses += 1
+            
+            child_metadata = {
+                "chunk_id": child_id,
+                "parent_chunk_id": parent_id,
+                "canonical_reference": verse_ref,
+                "text": verse_text
+            }
+            search_metadata_list.append(child_metadata)
+            retrieval_store[parent_id]['child_chunks'].append(child_metadata)
+            child_texts_for_embedding.append(verse_text)
+
+    print(f"\n  -> Total verses processed: {total_verses}")
+    embedding_vectors = get_embeddings_with_cache(embedding_model, bq_client, cache_table_id, child_texts_for_embedding)
+
+    # Using "chapters" as the parent level name for clarity
+    retrieval_path = f"app/local_chapters_{book_name.lower()}.pkl"
+    with open(retrieval_path, 'wb') as f:
+        pickle.dump(retrieval_store, f)
+    print(f"  -> Retrieval store saved to '{retrieval_path}'")
+
+    db_vectors = np.array(embedding_vectors, dtype=np.float32)
+    index = faiss.IndexFlatL2(db_vectors.shape[1])
+    index.add(db_vectors)
+    index_path = f"app/local_verses_{book_name.lower()}.faiss"
+    faiss.write_index(index, index_path)
+    print(f"  -> Search index saved to '{index_path}'")
+
+    search_meta_path = f"app/local_verses_{book_name.lower()}.pkl"
+    with open(search_meta_path, 'wb') as f:
+        pickle.dump(search_metadata_list, f)
+    print(f"  -> Search metadata saved to '{search_meta_path}'")
 
 def main():
-    """Main function to orchestrate the full ingestion process."""
-    parser = argparse.ArgumentParser(description="Fetch and process text from the Sefaria API.")
-    parser.add_argument("reference", type=str, help="The Sefaria reference to fetch (e.g., 'Genesis 1:1').")
+    parser = argparse.ArgumentParser(description="Fetch and process a full book from the Sefaria API.")
+    parser.add_argument("book", type=str, help="The book to process (e.g., 'Genesis').")
     args = parser.parse_args()
 
     load_dotenv()
@@ -136,17 +155,14 @@ def main():
     cache_table_id = os.getenv("BIGQUERY_CACHE_TABLE")
 
     if not all([project_id, location, cache_table_id]):
-        print("Error: GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, and BIGQUERY_CACHE_TABLE must be set in .env")
+        print("Error: Required environment variables must be set.")
         return
 
-    print("Configuration loaded successfully.")
     vertexai.init(project=project_id, location=location)
     embedding_model = TextEmbeddingModel.from_pretrained("text-embedding-004")
     bq_client = bigquery.Client(project=project_id)
-    print("Vertex AI and BigQuery clients initialized.")
 
-    print(f"\nProcessing Sefaria reference: {args.reference}")
-    process_sefaria_text(args.reference, embedding_model, bq_client, cache_table_id)
+    process_book_from_sefaria(args.book, embedding_model, bq_client, cache_table_id)
 
     print("\nSefaria harvester process complete.")
 
