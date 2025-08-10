@@ -51,9 +51,12 @@
       "description": "The level of this chunk within the document's hierarchy.",
       "type": "string"
     },
-    "parent_chunk_id": {
-      "description": "The ID of the immediate parent chunk in the hierarchy.",
-      "type": "string"
+    "parent_chunk_ids": {
+      "description": "A list of IDs of the parent chunks in the hierarchy.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "original_language_id": {
       "description": "The ID of the corresponding chunk in the original language.",
