@@ -16,7 +16,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION")
-GENERATIVE_MODEL_NAME = os.getenv("VERTEX_GENERATIVE_MODEL", "gemini-1.5-flash")
+GENERATIVE_MODEL_NAME = os.getenv("VERTEX_GENERATIVE_MODEL", "gemini-2.5-flash")
 
 # --- FastAPI App ---
 app = FastAPI(title="SCRIBE v3 API")
